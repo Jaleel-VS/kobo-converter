@@ -87,7 +87,7 @@ LOGIN_PAGE = f"""<!DOCTYPE html>
 <p class="subtitle">Please log in.</p>
 <div class="card">
 <h2>Login</h2>
-{{error}}
+%s
 <form method="post" action="/login">
 <input type="text" name="username" placeholder="Username">
 <input type="password" name="password" placeholder="Password">
@@ -97,8 +97,7 @@ LOGIN_PAGE = f"""<!DOCTYPE html>
 </body></html>"""
 
 # double braces for .format() escaping
-MAIN_PAGE = (
-    f"""<!DOCTYPE html>
+MAIN_PAGE = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kobo Converter</title>
@@ -115,9 +114,7 @@ MAIN_PAGE = (
 </div>
 <div class="card">
 <h2>Library</h2>
-<ul>"""
-    + "{file_links}"
-    + """</ul>
+<ul>%s</ul>
 </div>
 <form method="post" action="/logout">
 <input type="submit" value="Log out"
@@ -125,7 +122,6 @@ MAIN_PAGE = (
   font-size:.85em;font-family:inherit;padding:0;text-decoration:underline">
 </form>
 </body></html>"""
-)
 
 
 def _render_file_links() -> str:
@@ -148,7 +144,7 @@ def _render_file_links() -> str:
 async def login_page():
     if not AUTH_USERNAME:
         return RedirectResponse("/", status_code=303)
-    return LOGIN_PAGE.format(error="")
+    return LOGIN_PAGE % ""
 
 
 @app.post("/login")
@@ -167,7 +163,7 @@ async def login(request: Request):
 
     log.warning("Login failed")
     return HTMLResponse(
-        LOGIN_PAGE.format(error='<p class="error">Invalid credentials.</p>'),
+        LOGIN_PAGE % '<p class="error">Invalid credentials.</p>',
         status_code=401,
     )
 
@@ -183,7 +179,7 @@ async def logout():
 async def index(session: str | None = Cookie(default=None)):
     if not _is_authenticated(session):
         return RedirectResponse("/login", status_code=303)
-    return MAIN_PAGE.format(file_links=_render_file_links())
+    return MAIN_PAGE % _render_file_links()
 
 
 @app.post("/upload")
