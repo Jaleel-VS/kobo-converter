@@ -64,7 +64,7 @@ def run_kepubify(epub_path: Path) -> Path:
     """Run kepubify and return the output path."""
     output_dir = epub_path.parent
     subprocess.run(
-        ["kepubify", "-o", str(output_dir), str(epub_path)],
+        ["kepubify", "--inplace", "-o", str(output_dir), str(epub_path)],
         check=True, capture_output=True,
     )
     kepub = find_kepub(output_dir, epub_path.stem)
