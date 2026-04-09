@@ -11,11 +11,13 @@ log = logging.getLogger(__name__)
 SUPPORTED = {".epub", ".mobi", ".docx", ".pdf"}
 
 
-def expected_output_name(filename: str) -> str:
+def expected_output_name(filename: str, optimize_pdf: bool = False) -> str:
     """Predict the output filename after conversion."""
     p = Path(filename)
     if p.suffix.lower() in (".epub", ".mobi", ".docx"):
         return f"{p.stem}.kepub.epub"
+    if p.suffix.lower() == ".pdf" and optimize_pdf:
+        return f"{p.stem}-kobo.pdf"
     return p.name
 
 
@@ -55,10 +57,10 @@ def _cleanup(*paths: Path) -> None:
         p.unlink(missing_ok=True)
 
 
-def process(input_path: Path) -> Result[str, str]:
+def process(input_path: Path, *, optimize_pdf: bool = False) -> Result[str, str]:
     """Convert a file and upload to S3. Returns Ok(s3_key) or Err(message)."""
     suffix = input_path.suffix.lower()
-    log.info("Processing %s (type: %s)", input_path.name, suffix)
+    log.info("Processing %s (type: %s, optimize_pdf: %s)", input_path.name, suffix, optimize_pdf)
 
     try:
         if suffix == ".epub":
@@ -78,6 +80,16 @@ def process(input_path: Path) -> Result[str, str]:
             )
 
         if suffix == ".pdf":
+            if optimize_pdf:
+                from pdf_optimize import optimize
+
+                match optimize(input_path):
+                    case Ok(optimized):
+                        result = storage.upload(optimized)
+                        _cleanup(optimized)
+                        return result
+                    case Err() as e:
+                        return e
             return storage.upload(input_path)
 
         return Err(f"Unsupported format: {suffix}")

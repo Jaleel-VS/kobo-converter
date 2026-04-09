@@ -112,6 +112,9 @@ def _main_html() -> str:
         '<div class="card"><h2>Convert</h2>'
         '<form action="/upload" method="post" enctype="multipart/form-data">'
         '<input type="file" name="files" accept=".epub,.mobi,.docx,.pdf" multiple>'
+        '<label style="display:block;margin:.8em 0;font-size:.9em">'
+        '<input type="checkbox" name="optimize_pdf" value="1"> '
+        "Optimize PDFs for e-reader (split pages + landscape)</label>"
         '<input type="submit" value="Upload &amp; Convert">'
         "</form></div>"
         '<div class="card"><h2>Library</h2><ul>' + links + "</ul></div>"
@@ -188,6 +191,7 @@ async def upload(request: Request, session: str | None = Cookie(default=None)):
 
     form = await request.form()
     files: list[UploadFile] = form.getlist("files")
+    optimize_pdf = form.get("optimize_pdf") == "1"
     existing = set(storage.list_files())
     errors: list[str] = []
 
@@ -200,7 +204,7 @@ async def upload(request: Request, session: str | None = Cookie(default=None)):
             errors.append(f"{file.filename}: unsupported type {suffix}")
             continue
 
-        if converter.expected_output_name(file.filename) in existing:
+        if converter.expected_output_name(file.filename, optimize_pdf) in existing:
             log.info("Skipping duplicate: %s", file.filename)
             continue
 
@@ -208,7 +212,7 @@ async def upload(request: Request, session: str | None = Cookie(default=None)):
         with open(dest, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        result = converter.process(dest)
+        result = converter.process(dest, optimize_pdf=optimize_pdf)
         if isinstance(result, Err):
             errors.append(f"{file.filename}: {result.err_value}")
 

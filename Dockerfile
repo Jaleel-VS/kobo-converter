@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y calibre wget && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y calibre wget poppler-utils && rm -rf /var/lib/apt/lists/*
 
 RUN wget https://github.com/pgaskin/kepubify/releases/download/v4.0.4/kepubify-linux-64bit -O /usr/local/bin/kepubify \
     && chmod +x /usr/local/bin/kepubify
