@@ -48,32 +48,48 @@ def s3_download(filename: str):
     return resp["Body"], resp["ContentLength"]
 
 
+def find_kepub(directory: Path, stem: str) -> Path | None:
+    """Find the .kepub.epub file kepubify produced."""
+    for f in directory.iterdir():
+        if f.name.endswith(".kepub.epub") and f.name.startswith(stem):
+            return f
+    # fallback: any new .kepub.epub
+    for f in directory.iterdir():
+        if f.name.endswith(".kepub.epub"):
+            return f
+    return None
+
+
+def run_kepubify(epub_path: Path) -> Path:
+    """Run kepubify and return the output path."""
+    output_dir = epub_path.parent
+    subprocess.run(
+        ["kepubify", "-o", str(output_dir), str(epub_path)],
+        check=True, capture_output=True,
+    )
+    kepub = find_kepub(output_dir, epub_path.stem)
+    if not kepub:
+        raise FileNotFoundError(f"kepubify produced no output for {epub_path.name}")
+    return kepub
+
+
 def process_file(input_path: Path) -> str | None:
     """Convert file and upload to S3. Returns error message or None."""
     suffix = input_path.suffix.lower()
-    stem = input_path.stem
 
     try:
         if suffix == ".epub":
-            subprocess.run(
-                ["kepubify", "-o", str(input_path.parent), str(input_path)],
-                check=True, capture_output=True,
-            )
-            kepub = input_path.parent / f"{stem}.kepub.epub"
+            kepub = run_kepubify(input_path)
             s3_upload(kepub)
             kepub.unlink(missing_ok=True)
 
         elif suffix in (".mobi", ".docx"):
-            epub_path = input_path.parent / f"{stem}.epub"
+            epub_path = input_path.parent / f"{input_path.stem}.epub"
             subprocess.run(
                 ["ebook-convert", str(input_path), str(epub_path)],
                 check=True, capture_output=True,
             )
-            subprocess.run(
-                ["kepubify", "-o", str(input_path.parent), str(epub_path)],
-                check=True, capture_output=True,
-            )
-            kepub = input_path.parent / f"{stem}.kepub.epub"
+            kepub = run_kepubify(epub_path)
             s3_upload(kepub)
             kepub.unlink(missing_ok=True)
             epub_path.unlink(missing_ok=True)
