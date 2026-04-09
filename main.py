@@ -68,6 +68,15 @@ def s3_download(filename: str):
     return resp["Body"], resp["ContentLength"]
 
 
+def expected_output_name(filename: str) -> str:
+    """Predict the S3 key name a file would produce after conversion."""
+    p = Path(filename)
+    suffix = p.suffix.lower()
+    if suffix in (".epub", ".mobi", ".docx"):
+        return f"{p.stem}.kepub.epub"
+    return p.name
+
+
 def find_kepub(directory: Path, stem: str) -> Path | None:
     """Find the .kepub.epub file kepubify produced."""
     for f in directory.iterdir():
@@ -172,7 +181,7 @@ form{{margin:0}}
 <div class="card">
 <h2>Convert</h2>
 <form action="/upload" method="post" enctype="multipart/form-data">
-<input type="file" name="file" accept=".epub,.mobi,.docx,.pdf">
+<input type="file" name="files" accept=".epub,.mobi,.docx,.pdf" multiple>
 <input type="submit" value="Upload &amp; Convert">
 </form>
 </div>
@@ -184,24 +193,35 @@ form{{margin:0}}
 
 
 @app.post("/upload")
-async def upload(file: UploadFile, _=Depends(check_auth)):
-    if not file.filename:
-        return RedirectResponse("/", status_code=303)
+async def upload(files: list[UploadFile], _=Depends(check_auth)):
+    existing = set(s3_list_files())
+    errors = []
+    skipped = []
 
-    suffix = Path(file.filename).suffix.lower()
-    if suffix not in SUPPORTED:
-        return HTMLResponse(
-            f"<pre>Unsupported file type: {suffix}\nSupported: {', '.join(SUPPORTED)}</pre>",
-            status_code=400,
-        )
+    for file in files:
+        if not file.filename:
+            continue
 
-    dest = UPLOAD_DIR / file.filename
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        suffix = Path(file.filename).suffix.lower()
+        if suffix not in SUPPORTED:
+            errors.append(f"{file.filename}: unsupported type {suffix}")
+            continue
 
-    error = process_file(dest)
-    if error:
-        return HTMLResponse(f"<pre>{error}</pre>", status_code=500)
+        output_name = expected_output_name(file.filename)
+        if output_name in existing:
+            skipped.append(file.filename)
+            continue
+
+        dest = UPLOAD_DIR / file.filename
+        with open(dest, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        error = process_file(dest)
+        if error:
+            errors.append(f"{file.filename}: {error}")
+
+    if errors and not skipped:
+        return HTMLResponse(f"<pre>{'\\n'.join(errors)}</pre>", status_code=500)
 
     return RedirectResponse("/", status_code=303)
 
