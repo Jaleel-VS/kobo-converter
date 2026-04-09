@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY *.py .
 
+COPY log_config.json .
+
 RUN mkdir -p /app/books/uploads /app/books/processed
 
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --log-config log_config.json
