@@ -11,11 +11,21 @@
       "datefmt": "%H:%M:%S"
     }
   },
+  "filters": {
+    "below_error": { "()": "logging.Filter", "name": "" }
+  },
   "handlers": {
-    "default": {
+    "stdout": {
       "class": "logging.StreamHandler",
       "formatter": "default",
-      "stream": "ext://sys.stdout"
+      "stream": "ext://sys.stdout",
+      "level": "DEBUG"
+    },
+    "stderr": {
+      "class": "logging.StreamHandler",
+      "formatter": "default",
+      "stream": "ext://sys.stderr",
+      "level": "ERROR"
     },
     "access": {
       "class": "logging.StreamHandler",
@@ -24,8 +34,12 @@
     }
   },
   "loggers": {
-    "uvicorn": { "handlers": ["default"], "level": "INFO", "propagate": false },
-    "uvicorn.error": { "handlers": ["default"], "level": "INFO", "propagate": false },
+    "uvicorn": { "handlers": ["stdout", "stderr"], "level": "INFO", "propagate": false },
+    "uvicorn.error": { "handlers": ["stdout", "stderr"], "level": "INFO", "propagate": false },
     "uvicorn.access": { "handlers": ["access"], "level": "INFO", "propagate": false }
+  },
+  "root": {
+    "handlers": ["stdout", "stderr"],
+    "level": "INFO"
   }
 }
