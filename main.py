@@ -135,22 +135,51 @@ async def index(_=Depends(check_auth)):
     files = sorted(s3_list_files())
     file_links = "".join(
         f'<li><a href="/download/{f}">{f}</a>'
-        f' <form style="display:inline" method="post" action="/delete/{f}">'
-        f'<input type="submit" value="x" style="cursor:pointer;border:none;background:none;color:red;font-weight:bold"></form></li>'
+        f'<form method="post" action="/delete/{f}">'
+        f'<button type="submit" class="del" title="Delete">&times;</button></form></li>'
         for f in files
     )
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kobo Converter</title>
-<style>body{{font-family:sans-serif;max-width:600px;margin:2em auto;padding:0 1em}}
-h1{{font-size:1.4em}}ul{{padding-left:1.2em;list-style:none}}li{{margin:.3em 0}}</style></head>
-<body><h1>Kobo Converter</h1>
+<style>
+*{{box-sizing:border-box}}
+body{{font-family:Georgia,serif;margin:0;padding:2em 1em;max-width:540px;margin:0 auto;
+  background:#faf9f6;color:#2c2c2c}}
+h1{{font-size:1.6em;margin:0 0 .2em;letter-spacing:-.02em}}
+.subtitle{{color:#888;font-size:.9em;margin:0 0 2em}}
+.card{{background:#fff;border:1px solid #e0ddd8;border-radius:8px;padding:1.5em;margin-bottom:1.5em}}
+.card h2{{font-size:1em;margin:0 0 1em;color:#555;text-transform:uppercase;letter-spacing:.05em;font-family:sans-serif}}
+input[type=file]{{display:block;margin-bottom:1em;font-size:.95em}}
+input[type=submit]{{background:#2c2c2c;color:#faf9f6;border:none;padding:.6em 1.4em;
+  border-radius:6px;cursor:pointer;font-size:.95em;font-family:inherit}}
+input[type=submit]:active{{background:#555}}
+ul{{list-style:none;padding:0;margin:0}}
+li{{display:flex;align-items:center;justify-content:space-between;padding:.6em 0;
+  border-bottom:1px solid #eee}}
+li:last-child{{border-bottom:none}}
+li a{{color:#2c2c2c;text-decoration:none;word-break:break-all;flex:1}}
+li a:hover{{text-decoration:underline}}
+.del{{background:none;border:none;color:#c44;font-size:1.3em;cursor:pointer;
+  padding:0 0 0 .8em;line-height:1;font-family:sans-serif}}
+.del:hover{{color:#a00}}
+.empty{{color:#999;font-style:italic}}
+form{{margin:0}}
+</style></head>
+<body>
+<h1>&#128218; Kobo Converter</h1>
+<p class="subtitle">Upload an ebook &mdash; get a Kobo-ready file back.</p>
+<div class="card">
+<h2>Convert</h2>
 <form action="/upload" method="post" enctype="multipart/form-data">
 <input type="file" name="file" accept=".epub,.mobi,.docx,.pdf">
 <input type="submit" value="Upload &amp; Convert">
 </form>
-<h2>Processed Files</h2>
-<ul>{file_links or "<li>No files yet.</li>"}</ul>
+</div>
+<div class="card">
+<h2>Library</h2>
+<ul>{file_links or '<li class="empty">No files yet.</li>'}</ul>
+</div>
 </body></html>"""
 
 
