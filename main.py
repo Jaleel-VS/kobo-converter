@@ -226,11 +226,16 @@ async def download(filename: str, session: str | None = Cookie(default=None)):
         return RedirectResponse("/login", status_code=303)
     try:
         body, length = storage.download(filename)
+        from urllib.parse import quote
+
+        encoded = quote(filename)
+        ascii_name = filename.encode("ascii", errors="replace").decode()
+        disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
         return StreamingResponse(
             body.iter_chunks(),
             media_type="application/octet-stream",
             headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Disposition": disposition,
                 "Content-Length": str(length),
             },
         )
