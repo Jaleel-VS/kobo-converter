@@ -8,11 +8,11 @@ from botocore.exceptions import ClientError
 from fastapi import Depends, FastAPI, HTTPException, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from result import Err
 from starlette.responses import StreamingResponse
 
 import converter
 import storage
-from result import Err
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,9 +28,10 @@ app = FastAPI()
 security = HTTPBasic()
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
+AUTH_DEP = Depends(security)
 
 
-def check_auth(credentials: HTTPBasicCredentials = Depends(security)):
+def check_auth(credentials: HTTPBasicCredentials = AUTH_DEP):
     if not AUTH_USERNAME:
         return
     if not (
@@ -44,6 +45,8 @@ def check_auth(credentials: HTTPBasicCredentials = Depends(security)):
         )
 
 
+CHECK_AUTH = Depends(check_auth)
+
 # --- Dirs ---
 
 UPLOAD_DIR = Path("/app/books/uploads")
@@ -52,28 +55,32 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # --- HTML ---
 
 PAGE = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kobo Converter</title>
 <style>
 *{{box-sizing:border-box}}
-body{{font-family:Georgia,serif;margin:0;padding:2em 1em;max-width:540px;margin:0 auto;
-  background:#faf9f6;color:#2c2c2c}}
+body{{font-family:Georgia,serif;margin:0;padding:2em 1em;
+  max-width:540px;margin:0 auto;background:#faf9f6;color:#2c2c2c}}
 h1{{font-size:1.6em;margin:0 0 .2em;letter-spacing:-.02em}}
 .subtitle{{color:#888;font-size:.9em;margin:0 0 2em}}
-.card{{background:#fff;border:1px solid #e0ddd8;border-radius:8px;padding:1.5em;margin-bottom:1.5em}}
-.card h2{{font-size:1em;margin:0 0 1em;color:#555;text-transform:uppercase;letter-spacing:.05em;font-family:sans-serif}}
+.card{{background:#fff;border:1px solid #e0ddd8;
+  border-radius:8px;padding:1.5em;margin-bottom:1.5em}}
+.card h2{{font-size:1em;margin:0 0 1em;color:#555;
+  text-transform:uppercase;letter-spacing:.05em;font-family:sans-serif}}
 input[type=file]{{display:block;margin-bottom:1em;font-size:.95em}}
-input[type=submit]{{background:#2c2c2c;color:#faf9f6;border:none;padding:.6em 1.4em;
-  border-radius:6px;cursor:pointer;font-size:.95em;font-family:inherit}}
+input[type=submit]{{background:#2c2c2c;color:#faf9f6;border:none;
+  padding:.6em 1.4em;border-radius:6px;cursor:pointer;
+  font-size:.95em;font-family:inherit}}
 input[type=submit]:active{{background:#555}}
 ul{{list-style:none;padding:0;margin:0}}
-li{{display:flex;align-items:center;justify-content:space-between;padding:.6em 0;
-  border-bottom:1px solid #eee}}
+li{{display:flex;align-items:center;justify-content:space-between;
+  padding:.6em 0;border-bottom:1px solid #eee}}
 li:last-child{{border-bottom:none}}
 li a{{color:#2c2c2c;text-decoration:none;word-break:break-all;flex:1}}
 li a:hover{{text-decoration:underline}}
-.del{{background:none;border:none;color:#c44;font-size:1.3em;cursor:pointer;
-  padding:0 0 0 .8em;line-height:1;font-family:sans-serif}}
+.del{{background:none;border:none;color:#c44;font-size:1.3em;
+  cursor:pointer;padding:0 0 0 .8em;line-height:1;font-family:sans-serif}}
 .del:hover{{color:#a00}}
 .empty{{color:#999;font-style:italic}}
 form{{margin:0}}
@@ -102,7 +109,8 @@ def _render_file_links() -> str:
     return "".join(
         f'<li><a href="/download/{f}">{f}</a>'
         f'<form method="post" action="/delete/{f}">'
-        f'<button type="submit" class="del" title="Delete">&times;</button></form></li>'
+        f'<button type="submit" class="del" title="Delete">&times;</button>'
+        f"</form></li>"
         for f in files
     )
 
@@ -111,12 +119,12 @@ def _render_file_links() -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(_=Depends(check_auth)):
+async def index(_=CHECK_AUTH):
     return PAGE.format(file_links=_render_file_links())
 
 
 @app.post("/upload")
-async def upload(files: list[UploadFile], _=Depends(check_auth)):
+async def upload(files: list[UploadFile], _=CHECK_AUTH):
     existing = set(storage.list_files())
     errors: list[str] = []
 
@@ -139,17 +147,18 @@ async def upload(files: list[UploadFile], _=Depends(check_auth)):
 
         result = converter.process(dest)
         if isinstance(result, Err):
-            errors.append(f"{file.filename}: {result.error}")
+            errors.append(f"{file.filename}: {result.err_value}")
 
     if errors:
         log.warning("Upload errors: %s", errors)
-        return HTMLResponse(f"<pre>{'\\n'.join(errors)}</pre>", status_code=500)
+        msg = "\n".join(errors)
+        return HTMLResponse(f"<pre>{msg}</pre>", status_code=500)
 
     return RedirectResponse("/", status_code=303)
 
 
 @app.get("/download/{filename:path}")
-async def download(filename: str, _=Depends(check_auth)):
+async def download(filename: str, _=CHECK_AUTH):
     try:
         body, length = storage.download(filename)
         return StreamingResponse(
@@ -165,6 +174,6 @@ async def download(filename: str, _=Depends(check_auth)):
 
 
 @app.post("/delete/{filename:path}")
-async def delete(filename: str, _=Depends(check_auth)):
+async def delete(filename: str, _=CHECK_AUTH):
     storage.delete(filename)
     return RedirectResponse("/", status_code=303)

@@ -4,7 +4,6 @@ from pathlib import Path
 
 import boto3
 from botocore.exceptions import ClientError
-
 from result import Err, Ok, Result
 
 log = logging.getLogger(__name__)
@@ -22,7 +21,7 @@ def _s3():
     return _client
 
 
-def upload(local_path: Path) -> Result[str]:
+def upload(local_path: Path) -> Result[str, str]:
     key = f"{PREFIX}{local_path.name}"
     try:
         _s3().upload_file(str(local_path), BUCKET, key)
