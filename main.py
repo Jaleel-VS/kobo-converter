@@ -1,26 +1,38 @@
+import logging
 import os
 import secrets
 import shutil
-import subprocess
 from pathlib import Path
 
-import boto3
 from botocore.exceptions import ClientError
 from fastapi import Depends, FastAPI, HTTPException, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from starlette.responses import StreamingResponse
 
-app = FastAPI()
-security = HTTPBasic()
+import converter
+import storage
+from result import Err
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger(__name__)
+
+app = FastAPI()
+
+# --- Auth ---
+
+security = HTTPBasic()
 AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "")
 AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 
 
 def check_auth(credentials: HTTPBasicCredentials = Depends(security)):
     if not AUTH_USERNAME:
-        return  # auth disabled if env vars not set
+        return
     if not (
         secrets.compare_digest(credentials.username.encode(), AUTH_USERNAME.encode())
         and secrets.compare_digest(credentials.password.encode(), AUTH_PASSWORD.encode())
@@ -31,124 +43,15 @@ def check_auth(credentials: HTTPBasicCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Basic"},
         )
 
+
+# --- Dirs ---
+
 UPLOAD_DIR = Path("/app/books/uploads")
-PROCESSED_DIR = Path("/app/books/processed")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-S3_BUCKET = os.environ.get("S3_BUCKET", "kobo-converter-195950944512")
-S3_PREFIX = "processed/"
+# --- HTML ---
 
-SUPPORTED = {".epub", ".mobi", ".docx", ".pdf"}
-
-
-def get_s3():
-    return boto3.client("s3")
-
-
-def s3_upload(local_path: Path):
-    get_s3().upload_file(str(local_path), S3_BUCKET, f"{S3_PREFIX}{local_path.name}")
-
-
-def s3_list_files() -> list[str]:
-    try:
-        resp = get_s3().list_objects_v2(Bucket=S3_BUCKET, Prefix=S3_PREFIX)
-        return [
-            obj["Key"].removeprefix(S3_PREFIX)
-            for obj in resp.get("Contents", [])
-            if obj["Key"] != S3_PREFIX
-        ]
-    except ClientError:
-        return []
-
-
-def s3_download(filename: str):
-    """Returns a streaming body for the file."""
-    resp = get_s3().get_object(Bucket=S3_BUCKET, Key=f"{S3_PREFIX}{filename}")
-    return resp["Body"], resp["ContentLength"]
-
-
-def expected_output_name(filename: str) -> str:
-    """Predict the S3 key name a file would produce after conversion."""
-    p = Path(filename)
-    suffix = p.suffix.lower()
-    if suffix in (".epub", ".mobi", ".docx"):
-        return f"{p.stem}.kepub.epub"
-    return p.name
-
-
-def find_kepub(directory: Path, stem: str) -> Path | None:
-    """Find the .kepub.epub file kepubify produced."""
-    for f in directory.iterdir():
-        if f.name.endswith(".kepub.epub") and f.name.startswith(stem):
-            return f
-    # fallback: any new .kepub.epub
-    for f in directory.iterdir():
-        if f.name.endswith(".kepub.epub"):
-            return f
-    return None
-
-
-def run_kepubify(epub_path: Path) -> Path:
-    """Run kepubify and return the output path."""
-    output_dir = epub_path.parent
-    subprocess.run(
-        ["kepubify", "--inplace", "-o", str(output_dir), str(epub_path)],
-        check=True, capture_output=True,
-    )
-    kepub = find_kepub(output_dir, epub_path.stem)
-    if not kepub:
-        raise FileNotFoundError(f"kepubify produced no output for {epub_path.name}")
-    return kepub
-
-
-def process_file(input_path: Path) -> str | None:
-    """Convert file and upload to S3. Returns error message or None."""
-    suffix = input_path.suffix.lower()
-
-    try:
-        if suffix == ".epub":
-            kepub = run_kepubify(input_path)
-            s3_upload(kepub)
-            kepub.unlink(missing_ok=True)
-
-        elif suffix in (".mobi", ".docx"):
-            epub_path = input_path.parent / f"{input_path.stem}.epub"
-            subprocess.run(
-                ["ebook-convert", str(input_path), str(epub_path)],
-                check=True, capture_output=True,
-            )
-            kepub = run_kepubify(epub_path)
-            s3_upload(kepub)
-            kepub.unlink(missing_ok=True)
-            epub_path.unlink(missing_ok=True)
-
-        elif suffix == ".pdf":
-            s3_upload(input_path)
-
-        else:
-            return f"Unsupported format: {suffix}"
-
-    except subprocess.CalledProcessError as e:
-        return f"Conversion failed: {e.stderr.decode(errors='replace')}"
-    except ClientError as e:
-        return f"S3 upload failed: {e}"
-    finally:
-        input_path.unlink(missing_ok=True)
-
-    return None
-
-
-@app.get("/", response_class=HTMLResponse)
-async def index(_=Depends(check_auth)):
-    files = sorted(s3_list_files())
-    file_links = "".join(
-        f'<li><a href="/download/{f}">{f}</a>'
-        f'<form method="post" action="/delete/{f}">'
-        f'<button type="submit" class="del" title="Delete">&times;</button></form></li>'
-        for f in files
-    )
-    return f"""<!DOCTYPE html>
+PAGE = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kobo Converter</title>
 <style>
@@ -187,40 +90,59 @@ form{{margin:0}}
 </div>
 <div class="card">
 <h2>Library</h2>
-<ul>{file_links or '<li class="empty">No files yet.</li>'}</ul>
+<ul>{file_links}</ul>
 </div>
 </body></html>"""
 
 
+def _render_file_links() -> str:
+    files = sorted(storage.list_files())
+    if not files:
+        return '<li class="empty">No files yet.</li>'
+    return "".join(
+        f'<li><a href="/download/{f}">{f}</a>'
+        f'<form method="post" action="/delete/{f}">'
+        f'<button type="submit" class="del" title="Delete">&times;</button></form></li>'
+        for f in files
+    )
+
+
+# --- Routes ---
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index(_=Depends(check_auth)):
+    return PAGE.format(file_links=_render_file_links())
+
+
 @app.post("/upload")
 async def upload(files: list[UploadFile], _=Depends(check_auth)):
-    existing = set(s3_list_files())
-    errors = []
-    skipped = []
+    existing = set(storage.list_files())
+    errors: list[str] = []
 
     for file in files:
         if not file.filename:
             continue
 
         suffix = Path(file.filename).suffix.lower()
-        if suffix not in SUPPORTED:
+        if suffix not in converter.SUPPORTED:
             errors.append(f"{file.filename}: unsupported type {suffix}")
             continue
 
-        output_name = expected_output_name(file.filename)
-        if output_name in existing:
-            skipped.append(file.filename)
+        if converter.expected_output_name(file.filename) in existing:
+            log.info("Skipping duplicate: %s", file.filename)
             continue
 
         dest = UPLOAD_DIR / file.filename
         with open(dest, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        error = process_file(dest)
-        if error:
-            errors.append(f"{file.filename}: {error}")
+        result = converter.process(dest)
+        if isinstance(result, Err):
+            errors.append(f"{file.filename}: {result.error}")
 
-    if errors and not skipped:
+    if errors:
+        log.warning("Upload errors: %s", errors)
         return HTMLResponse(f"<pre>{'\\n'.join(errors)}</pre>", status_code=500)
 
     return RedirectResponse("/", status_code=303)
@@ -229,7 +151,7 @@ async def upload(files: list[UploadFile], _=Depends(check_auth)):
 @app.get("/download/{filename:path}")
 async def download(filename: str, _=Depends(check_auth)):
     try:
-        body, length = s3_download(filename)
+        body, length = storage.download(filename)
         return StreamingResponse(
             body.iter_chunks(),
             media_type="application/octet-stream",
@@ -244,8 +166,5 @@ async def download(filename: str, _=Depends(check_auth)):
 
 @app.post("/delete/{filename:path}")
 async def delete(filename: str, _=Depends(check_auth)):
-    try:
-        get_s3().delete_object(Bucket=S3_BUCKET, Key=f"{S3_PREFIX}{filename}")
-    except ClientError:
-        pass
+    storage.delete(filename)
     return RedirectResponse("/", status_code=303)
