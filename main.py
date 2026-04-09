@@ -55,7 +55,10 @@ def process_file(input_path: Path) -> str | None:
 
     try:
         if suffix == ".epub":
-            subprocess.run(["kepubify", str(input_path)], check=True, capture_output=True)
+            subprocess.run(
+                ["kepubify", "-o", str(input_path.parent), str(input_path)],
+                check=True, capture_output=True,
+            )
             kepub = input_path.parent / f"{stem}.kepub.epub"
             s3_upload(kepub)
             kepub.unlink(missing_ok=True)
@@ -66,7 +69,10 @@ def process_file(input_path: Path) -> str | None:
                 ["ebook-convert", str(input_path), str(epub_path)],
                 check=True, capture_output=True,
             )
-            subprocess.run(["kepubify", str(epub_path)], check=True, capture_output=True)
+            subprocess.run(
+                ["kepubify", "-o", str(input_path.parent), str(epub_path)],
+                check=True, capture_output=True,
+            )
             kepub = input_path.parent / f"{stem}.kepub.epub"
             s3_upload(kepub)
             kepub.unlink(missing_ok=True)
