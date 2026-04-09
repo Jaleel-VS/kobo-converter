@@ -1,15 +1,35 @@
 import os
+import secrets
 import shutil
 import subprocess
 from pathlib import Path
 
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import FastAPI, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from starlette.responses import StreamingResponse
 
 app = FastAPI()
+security = HTTPBasic()
+
+AUTH_USERNAME = os.environ.get("AUTH_USERNAME", "")
+AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
+
+
+def check_auth(credentials: HTTPBasicCredentials = Depends(security)):
+    if not AUTH_USERNAME:
+        return  # auth disabled if env vars not set
+    if not (
+        secrets.compare_digest(credentials.username.encode(), AUTH_USERNAME.encode())
+        and secrets.compare_digest(credentials.password.encode(), AUTH_PASSWORD.encode())
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
 
 UPLOAD_DIR = Path("/app/books/uploads")
 PROCESSED_DIR = Path("/app/books/processed")
@@ -111,16 +131,19 @@ def process_file(input_path: Path) -> str | None:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
+async def index(_=Depends(check_auth)):
     files = sorted(s3_list_files())
     file_links = "".join(
-        f'<li><a href="/download/{f}">{f}</a></li>' for f in files
+        f'<li><a href="/download/{f}">{f}</a>'
+        f' <form style="display:inline" method="post" action="/delete/{f}">'
+        f'<input type="submit" value="x" style="cursor:pointer;border:none;background:none;color:red;font-weight:bold"></form></li>'
+        for f in files
     )
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kobo Converter</title>
 <style>body{{font-family:sans-serif;max-width:600px;margin:2em auto;padding:0 1em}}
-h1{{font-size:1.4em}}ul{{padding-left:1.2em}}li{{margin:.3em 0}}</style></head>
+h1{{font-size:1.4em}}ul{{padding-left:1.2em;list-style:none}}li{{margin:.3em 0}}</style></head>
 <body><h1>Kobo Converter</h1>
 <form action="/upload" method="post" enctype="multipart/form-data">
 <input type="file" name="file" accept=".epub,.mobi,.docx,.pdf">
@@ -132,7 +155,7 @@ h1{{font-size:1.4em}}ul{{padding-left:1.2em}}li{{margin:.3em 0}}</style></head>
 
 
 @app.post("/upload")
-async def upload(file: UploadFile):
+async def upload(file: UploadFile, _=Depends(check_auth)):
     if not file.filename:
         return RedirectResponse("/", status_code=303)
 
@@ -155,7 +178,7 @@ async def upload(file: UploadFile):
 
 
 @app.get("/download/{filename:path}")
-async def download(filename: str):
+async def download(filename: str, _=Depends(check_auth)):
     try:
         body, length = s3_download(filename)
         return StreamingResponse(
@@ -168,3 +191,12 @@ async def download(filename: str):
         )
     except ClientError:
         return HTMLResponse("<pre>File not found.</pre>", status_code=404)
+
+
+@app.post("/delete/{filename:path}")
+async def delete(filename: str, _=Depends(check_auth)):
+    try:
+        get_s3().delete_object(Bucket=S3_BUCKET, Key=f"{S3_PREFIX}{filename}")
+    except ClientError:
+        pass
+    return RedirectResponse("/", status_code=303)
