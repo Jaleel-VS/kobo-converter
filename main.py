@@ -31,7 +31,9 @@ SESSION_SECRET = os.environ.get("SESSION_SECRET", secrets.token_hex(32))
 
 
 def _make_token() -> str:
-    return hashlib.sha256(f"{AUTH_USERNAME}:{AUTH_PASSWORD}:{SESSION_SECRET}".encode()).hexdigest()
+    return hashlib.sha256(
+        f"{AUTH_USERNAME}:{AUTH_PASSWORD}:{SESSION_SECRET}".encode()
+    ).hexdigest()
 
 
 def _is_authenticated(session: str | None) -> bool:
@@ -96,7 +98,9 @@ def _login_html(error: str = "") -> str:
     return _page(
         "Login",
         '<p class="subtitle">Please log in.</p>'
-        '<div class="card"><h2>Login</h2>' + error + '<form method="post" action="/login">'
+        '<div class="card"><h2>Login</h2>'
+        + error
+        + '<form method="post" action="/login">'
         '<input type="text" name="username" placeholder="Username">'
         '<input type="password" name="password" placeholder="Password">'
         '<input type="submit" value="Log in">'
@@ -143,7 +147,7 @@ def _render_file_links() -> str:
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page():
+def login_page():
     if not AUTH_USERNAME:
         return RedirectResponse("/", status_code=303)
     return _login_html()
@@ -171,14 +175,14 @@ async def login(request: Request):
 
 
 @app.post("/logout")
-async def logout():
+def logout():
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie("session")
     return response
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(session: str | None = Cookie(default=None)):
+def index(session: str | None = Cookie(default=None)):
     if not _is_authenticated(session):
         return RedirectResponse("/login", status_code=303)
     return _main_html()
@@ -224,8 +228,10 @@ async def upload(request: Request, session: str | None = Cookie(default=None)):
     return RedirectResponse("/", status_code=303)
 
 
+
+
 @app.get("/download/{filename:path}")
-async def download(filename: str, session: str | None = Cookie(default=None)):
+def download(filename: str, session: str | None = Cookie(default=None)):
     if not _is_authenticated(session):
         return RedirectResponse("/login", status_code=303)
     try:
@@ -234,7 +240,9 @@ async def download(filename: str, session: str | None = Cookie(default=None)):
 
         encoded = quote(filename)
         ascii_name = filename.encode("ascii", errors="replace").decode()
-        disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
+        disposition = (
+            f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
+        )
         return StreamingResponse(
             body.iter_chunks(),
             media_type="application/octet-stream",
@@ -248,7 +256,7 @@ async def download(filename: str, session: str | None = Cookie(default=None)):
 
 
 @app.post("/delete/{filename:path}")
-async def delete(filename: str, session: str | None = Cookie(default=None)):
+def delete(filename: str, session: str | None = Cookie(default=None)):
     if not _is_authenticated(session):
         return RedirectResponse("/login", status_code=303)
     storage.delete(filename)
